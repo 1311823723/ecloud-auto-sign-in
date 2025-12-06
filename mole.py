@@ -10,7 +10,12 @@ mole_accounts = os.getenv("MOLE_ACCOUNTS").split("\n")
 
 
 def main():
-    pusher = WeChat("摩尔庄园", wechat_params)
+    if len(wechat_params) >= 5:
+        pusher = WeChat("摩尔庄园", wechat_params)
+    else:
+        # 2. 不够就置为 None，防止报错
+        pusher = None 
+        print("⚠️ 微信推送参数未配置或格式错误，本次将只签到不推送")
     record_file = Path("mole.json")
     # 摩尔庄园签到
     success = False
@@ -112,7 +117,7 @@ def main():
                     latest_sign_dict[username] = next_date.isoformat()
                     with record_file.open("w") as file:
                         json.dump(latest_sign_dict, file, indent=2)
-    if success:
+    if success and pusher:
         pusher.push(sio.getvalue().strip())
     logger.info(sio.getvalue().strip())
 
