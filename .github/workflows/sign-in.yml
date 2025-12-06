@@ -36,5 +36,6 @@ jobs:
           default_author: github_actions
           message: 更新补签数据
       - name: 天翼云盘签到
+        if: env.ECLOUD_ACCOUNT != '' # 加了个判断，只有配置了账号才跑
         run: |
           python ecloud.py
