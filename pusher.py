@@ -55,5 +55,5 @@ class WeChat:
             logger.error(f"推送请求异常: {e}")
 
 # 这一行是为了兼容 mole.py 的 'from pusher import *' 引用机制
-# 如果 mole.py 引用了其他变量，这里可能需要补充，但看之前的报错，只用到了 WeChat 类
-__all__ = ['WeChat']
+# 把 requests 和 sio 也暴露出去，变成 public
+__all__ = ['WeChat', 'requests', 'sio', 'json', 'io']
