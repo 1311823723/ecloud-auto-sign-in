@@ -37,5 +37,4 @@ jobs:
         env:
           MOLE_ACCOUNTS: ${{ secrets.MOLE_ACCOUNTS }}
           WECHAT_PARAMS: ${{ secrets.WECHAT_PARAMS }}
-        # 注意：这里的文件名 'mole.py' 需要你确认一下仓库里实际的主入口文件名是什么
-        run: python mole.py
+        run: python main.py
