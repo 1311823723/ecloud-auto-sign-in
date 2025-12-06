@@ -3,9 +3,7 @@ from loguru import logger
 from datetime import date, timedelta
 from pathlib import Path
 from pusher import *
-import json        # <--- 新增：补回 json
-import requests    # <--- 新增：补回 requests
-import io          # <--- 新增：补回 io
+
 
 # 摩尔庄园米饭签到
 wechat_params = os.getenv("WECHAT_PARAMS").split(",")
