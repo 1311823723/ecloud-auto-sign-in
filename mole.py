@@ -11,7 +11,7 @@ mole_accounts = os.getenv("MOLE_ACCOUNTS").split("\n")
 
 
 def main():
-    if len(wechat_params) >= 5:
+    if len(wechat_params) >= 1:
         pusher = WeChat("摩尔庄园", wechat_params)
     else:
         # 2. 不够就置为 None，防止报错
