@@ -37,4 +37,4 @@ jobs:
         env:
           MOLE_ACCOUNTS: ${{ secrets.MOLE_ACCOUNTS }}
           WECHAT_PARAMS: ${{ secrets.WECHAT_PARAMS }}
-        run: python main.py
+        run: python mole.py
