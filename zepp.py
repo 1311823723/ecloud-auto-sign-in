@@ -6,6 +6,7 @@ import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime
+from urllib.parse import parse_qs, urlparse
 
 from loguru import logger
 from pusher import WeChat, requests, sio
@@ -79,10 +80,26 @@ def parse_accounts():
 
 
 def get_access_code(location):
-    match = re.search(r"(?<=access=)[^&]+", location or "")
-    if not match:
-        raise RuntimeError("Zepp 登录失败：未从重定向地址中获取 access code")
-    return match.group(0)
+    params = parse_qs(urlparse(location or "").query)
+    access_values = params.get("access")
+    if not access_values:
+        raise RuntimeError(f"Zepp 登录失败：未从重定向地址中获取 access code，{location_summary(location)}")
+    return access_values[0]
+
+
+def location_summary(location):
+    if not location:
+        return "location 为空"
+    parsed = urlparse(location)
+    params = parse_qs(parsed.query)
+    safe_params = {}
+    for key in ("error", "error_code", "error_description", "message", "msg", "state"):
+        if key in params:
+            safe_params[key] = params[key][0]
+    if safe_params:
+        return f"location 参数：{safe_params}"
+    safe_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+    return f"location={safe_url}, query_keys={list(params.keys())}"
 
 
 def response_summary(response):
