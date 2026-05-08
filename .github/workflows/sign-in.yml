@@ -16,9 +16,6 @@ jobs:
       WECHAT_PARAMS: ${{ secrets.WECHAT_PARAMS }}
       MOLE_ACCOUNTS: ${{ secrets.MOLE_ACCOUNTS }}
       ECLOUD_ACCOUNT: ${{ secrets.ECLOUD_ACCOUNT }}
-      ZEPP_ACCOUNTS: ${{ secrets.ZEPP_ACCOUNTS }}
-      ZEPP_STEP_MIN: ${{ secrets.ZEPP_STEP_MIN }}
-      ZEPP_STEP_MAX: ${{ secrets.ZEPP_STEP_MAX }}
     steps:
       - name: 拉取代码
         uses: actions/checkout@v5
@@ -42,7 +39,3 @@ jobs:
         if: env.ECLOUD_ACCOUNT != '' # 加了个判断，只有配置了账号才跑
         run: |
           python ecloud.py
-      - name: Zepp 步数同步
-        if: env.ZEPP_ACCOUNTS != '' # 只有配置了 Zepp 账号才跑
-        run: |
-          python zepp.py
