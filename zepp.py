@@ -1,7 +1,8 @@
-import hashlib
 import json
 import os
 import random
+import re
+import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -11,12 +12,17 @@ from pusher import WeChat, requests, sio
 
 
 APP_NAME = "com.xiaomi.hm.health"
-APP_VERSION = "6.12.0"
+APP_VERSION = "6.5.5"
 CLIENT_ID = "HuaMi"
 REDIRECT_URI = "https://s3-us-west-2.amazonaws.com/hm-registration/successsignin.html"
 LOGIN_URL_TEMPLATE = "https://api-user.huami.com/registrations/{account}/tokens"
 TOKEN_URL = "https://account.huami.com/v2/client/login"
+APP_TOKEN_URL = "https://account-cn.huami.com/v1/client/app_tokens"
 UPLOAD_URL = "https://api-mifit-cn2.huami.com/v1/data/band_data.json"
+DN = "api-user.huami.com,api-mifit.huami.com,app-analytics.huami.com"
+
+logger.remove()
+logger.add(sys.stderr, diagnose=False)
 
 
 @dataclass
@@ -30,6 +36,13 @@ def mask_account(username):
     if len(username) <= 4:
         return "*" * len(username)
     return f"{username[:3]}****{username[-4:]}"
+
+
+def format_account(username):
+    username = username.strip()
+    if re.fullmatch(r"\d+", username):
+        return f"+86{username}"
+    return username
 
 
 def getenv_list(name):
@@ -65,45 +78,86 @@ def parse_accounts():
     return accounts
 
 
+def get_access_code(location):
+    match = re.search(r"(?<=access=)[^&]+", location or "")
+    if not match:
+        raise RuntimeError("Zepp 登录失败：未从重定向地址中获取 access code")
+    return match.group(0)
+
+
+def response_summary(response):
+    content_type = response.headers.get("Content-Type", "")
+    preview = response.text[:120].replace("\n", " ").replace("\r", " ")
+    return f"status={response.status_code}, content-type={content_type}, body={preview}"
+
+
 def login(session, username, password):
-    hashed_password = hashlib.md5(password.encode()).hexdigest()
-    url = LOGIN_URL_TEMPLATE.format(account=username)
+    account = format_account(username)
+    url = LOGIN_URL_TEMPLATE.format(account=account)
     data = {
         "client_id": CLIENT_ID,
-        "password": hashed_password,
+        "password": password,
         "redirect_uri": REDIRECT_URI,
         "token": "access",
     }
     headers = {
         "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-        "User-Agent": f"MiFit/{APP_VERSION} ({APP_NAME})",
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 14_7_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2",
     }
-    response = session.post(url, data=data, headers=headers, timeout=15)
+    response = session.post(url, data=data, headers=headers, timeout=15, allow_redirects=False)
     response.raise_for_status()
-    result = response.json()
-    login_token = result.get("token_info", {}).get("login_token")
-    if not login_token:
-        raise RuntimeError(f"Zepp 登录失败：{result}")
+    location = response.headers.get("Location")
+    if not location:
+        raise RuntimeError(f"Zepp 登录失败：未返回重定向地址，{response_summary(response)}")
+    code = get_access_code(location)
 
     params = {
         "app_name": APP_NAME,
         "app_version": APP_VERSION,
-        "code": login_token,
+        "code": code,
         "country_code": "CN",
         "device_id": "2C8B4939-0CCD-4E94-8CBA-CB8EA6E613A1",
         "device_model": "phone",
+        "dn": DN,
         "grant_type": "access_token",
-        "third_name": "huami_phone",
+        "lang": "zh_CN",
+        "os_version": "1.5.0",
+        "source": APP_NAME,
+        "third_name": "huami_phone" if account.startswith("+") else "email",
     }
     response = session.get(TOKEN_URL, params=params, headers=headers, timeout=15)
     response.raise_for_status()
-    result = response.json()
+    try:
+        result = response.json()
+    except requests.exceptions.JSONDecodeError as exc:
+        raise RuntimeError(f"Zepp token 获取失败：返回内容不是 JSON，{response_summary(response)}") from exc
     token_info = result.get("token_info", {})
-    app_token = token_info.get("app_token")
+    login_token = token_info.get("login_token")
     user_id = result.get("user_id")
-    if not app_token or not user_id:
-        raise RuntimeError(f"Zepp token 获取失败：{result}")
-    return app_token, user_id
+    if not login_token or not user_id:
+        raise RuntimeError(f"Zepp login_token 获取失败：{result}")
+    return login_token, user_id
+
+
+def get_app_token(session, login_token):
+    headers = {
+        "User-Agent": f"MiFit/{APP_VERSION} (iPhone; iOS 14.0.1; Scale/2.00)",
+    }
+    params = {
+        "app_name": APP_NAME,
+        "dn": DN,
+        "login_token": login_token,
+    }
+    response = session.get(APP_TOKEN_URL, params=params, headers=headers, timeout=15)
+    response.raise_for_status()
+    try:
+        result = response.json()
+    except requests.exceptions.JSONDecodeError as exc:
+        raise RuntimeError(f"Zepp app_token 获取失败：返回内容不是 JSON，{response_summary(response)}") from exc
+    app_token = result.get("token_info", {}).get("app_token")
+    if not app_token:
+        raise RuntimeError(f"Zepp app_token 获取失败：{result}")
+    return app_token
 
 
 def build_step_payload(user_id, steps):
@@ -157,7 +211,7 @@ def build_step_payload(user_id, steps):
     }
 
 
-def upload_steps(session, app_token, user_id, steps):
+def upload_steps(session, login_token, app_token, user_id, steps):
     payload = build_step_payload(user_id, steps)
     headers = {
         "apptoken": app_token,
@@ -171,9 +225,12 @@ def upload_steps(session, app_token, user_id, steps):
         "last_deviceid": payload["last_deviceid"],
         "data_json": json.dumps(payload["data_json"], ensure_ascii=False),
     }
-    response = session.post(UPLOAD_URL, headers=headers, data=data, timeout=15)
+    response = session.post(UPLOAD_URL, headers=headers, params={"login_token": login_token}, data=data, timeout=15)
     response.raise_for_status()
-    result = response.json()
+    try:
+        result = response.json()
+    except requests.exceptions.JSONDecodeError as exc:
+        raise RuntimeError(f"Zepp 步数上传失败：返回内容不是 JSON，{response_summary(response)}") from exc
     if result.get("code") not in (1, "1", 200, "200"):
         raise RuntimeError(f"Zepp 步数上传失败：{result}")
     return result
@@ -197,13 +254,14 @@ def main():
                 success = True
                 continue
             with requests.Session() as session:
-                app_token, user_id = login(session, account.username, account.password)
-                upload_steps(session, app_token, user_id, account.steps)
+                login_token, user_id = login(session, account.username, account.password)
+                app_token = get_app_token(session, login_token)
+                upload_steps(session, login_token, app_token, user_id, account.steps)
             sio.write(f"Zepp 步数提示：{masked} 同步成功，步数 {account.steps}\n")
             success = True
         except Exception as exc:
             sio.write(f"Zepp 步数提示：{masked} 同步失败：{exc}\n")
-            logger.exception("Zepp 步数同步失败")
+            logger.error(f"Zepp 步数同步失败：{exc}")
 
     content = sio.getvalue().strip()
     if success and pusher:
